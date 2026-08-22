@@ -50,8 +50,11 @@ export async function POST(request: Request) {
   }
 
   if (!process.env.RESEND_API_KEY) {
-    console.info("Quote request received (email delivery not configured):", quote);
-    return NextResponse.json({ ok: true, delivery: "not-configured" });
+    console.error("Quote delivery is not configured.");
+    return NextResponse.json(
+      { error: "Online quote delivery is being activated. Please contact Floush Logistics directly for assistance." },
+      { status: 503 },
+    );
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
