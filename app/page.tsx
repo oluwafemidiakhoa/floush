@@ -62,7 +62,7 @@ export default function HomePage() {
 
       <section className="section" id="quote">
         <div className="shell">
-          <div className="section-head centered"><div className="eyebrow">Request a quote</div><h2>Tell us about your freight.</h2><p>Share your route, timing, equipment needs, and freight details. We will review the request and follow up with availability and next steps.</p></div>
+          <div className="section-head centered"><div className="eyebrow">Request a quote</div><h2>Tell us about your freight.</h2><p>Share your route, timing, equipment needs, and freight details. We will review the request and follow up with availability and next steps. Prefer email? Contact <a href="mailto:quotes@floushlogistics.com"><strong>quotes@floushlogistics.com</strong></a>.</p></div>
 
           <div className="trust-strip" aria-label="Carrier compliance status">
             {compliance.map(([label, value]) => <div className="trust-item" key={label}><span>{label}</span><strong>{value}</strong></div>)}
@@ -73,7 +73,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="footer"><div className="shell footer-inner"><strong>Floush Logistics LLC</strong><span>Delivering Excellence. Driving Trust.</span><span>© 2026 Floush Logistics LLC</span></div></footer>
+      <footer className="footer"><div className="shell footer-inner"><strong>Floush Logistics LLC</strong><span><a href="mailto:quotes@floushlogistics.com">quotes@floushlogistics.com</a></span><span>Delivering Excellence. Driving Trust.</span><span>© 2026 Floush Logistics LLC</span></div></footer>
     </main>
   );
 }
