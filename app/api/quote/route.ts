@@ -109,7 +109,6 @@ export async function POST(request: Request) {
     `;
 
     quoteId = String(rows[0]?.id ?? "");
-
     if (!quoteId) throw new Error("Quote record was not created.");
   } catch (error) {
     console.error("Quote persistence failed:", error);
@@ -136,8 +135,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, id: quoteId, notification: "not_configured" });
   }
 
-  const to = process.env.QUOTE_NOTIFICATION_EMAIL || "operations@floushlogistics.com";
-  const from = process.env.ZOHO_SMTP_FROM || `Floush Logistics <${process.env.ZOHO_SMTP_USER}>`;
+  const to = process.env.QUOTE_NOTIFICATION_EMAIL || "quotes@floushlogistics.com";
+  const from = process.env.ZOHO_SMTP_FROM || "Floush Quotes <quotes@floushlogistics.com>";
 
   let notification: "sent" | "failed" = "sent";
   let notificationError: string | null = null;
