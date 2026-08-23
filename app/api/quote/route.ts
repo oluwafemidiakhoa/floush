@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import { getSql } from "@/lib/db";
 
 type QuotePayload = {
@@ -27,6 +27,23 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function getZohoTransporter() {
+  const user = process.env.ZOHO_SMTP_USER;
+  const pass = process.env.ZOHO_SMTP_PASSWORD;
+
+  if (!user || !pass) return null;
+
+  const port = Number(process.env.ZOHO_SMTP_PORT || "465");
+  const secure = (process.env.ZOHO_SMTP_SECURE || "true").toLowerCase() === "true";
+
+  return nodemailer.createTransport({
+    host: process.env.ZOHO_SMTP_HOST || "smtp.zoho.com",
+    port,
+    secure,
+    auth: { user, pass },
+  });
 }
 
 export async function POST(request: Request) {
@@ -93,9 +110,7 @@ export async function POST(request: Request) {
 
     quoteId = String(rows[0]?.id ?? "");
 
-    if (!quoteId) {
-      throw new Error("Quote record was not created.");
-    }
+    if (!quoteId) throw new Error("Quote record was not created.");
   } catch (error) {
     console.error("Quote persistence failed:", error);
     return NextResponse.json(
@@ -104,7 +119,9 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!process.env.RESEND_API_KEY) {
+  const transporter = getZohoTransporter();
+
+  if (!transporter) {
     try {
       const sql = getSql();
       await sql`
@@ -119,60 +136,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, id: quoteId, notification: "not_configured" });
   }
 
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const to = process.env.QUOTE_NOTIFICATION_EMAIL || "operations@floushfreight.com";
-  const from = process.env.QUOTE_FROM_EMAIL || "Floush Logistics <onboarding@resend.dev>";
+  const to = process.env.QUOTE_NOTIFICATION_EMAIL || "operations@floushlogistics.com";
+  const from = process.env.ZOHO_SMTP_FROM || `Floush Logistics <${process.env.ZOHO_SMTP_USER}>`;
 
-  const { error } = await resend.emails.send({
-    from,
-    to,
-    replyTo: quote.email,
-    subject: `New freight quote: ${quote.pickup} → ${quote.delivery}`,
-    html: `
-      <h2>New Floush Logistics quote request</h2>
-      <p><strong>Quote ID:</strong> ${escapeHtml(quoteId)}</p>
-      <p><strong>Company:</strong> ${escapeHtml(quote.company)}</p>
-      <p><strong>Contact:</strong> ${escapeHtml(quote.contact)}</p>
-      <p><strong>Email:</strong> ${escapeHtml(quote.email)}</p>
-      <p><strong>Phone:</strong> ${escapeHtml(quote.phone)}</p>
-      <p><strong>Pickup:</strong> ${escapeHtml(quote.pickup)}</p>
-      <p><strong>Delivery:</strong> ${escapeHtml(quote.delivery)}</p>
-      <p><strong>Pickup date:</strong> ${escapeHtml(quote.pickupDate)}</p>
-      <p><strong>Equipment:</strong> ${escapeHtml(quote.equipment)}</p>
-      <p><strong>Freight details:</strong><br>${escapeHtml(quote.details).replaceAll("\n", "<br>")}</p>
-    `,
-  });
+  let notification: "sent" | "failed" = "sent";
+  let notificationError: string | null = null;
+
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      replyTo: quote.email,
+      subject: `New freight quote: ${quote.pickup} → ${quote.delivery}`,
+      html: `
+        <h2>New Floush Logistics quote request</h2>
+        <p><strong>Quote ID:</strong> ${escapeHtml(quoteId)}</p>
+        <p><strong>Company:</strong> ${escapeHtml(quote.company)}</p>
+        <p><strong>Contact:</strong> ${escapeHtml(quote.contact)}</p>
+        <p><strong>Email:</strong> ${escapeHtml(quote.email)}</p>
+        <p><strong>Phone:</strong> ${escapeHtml(quote.phone)}</p>
+        <p><strong>Pickup:</strong> ${escapeHtml(quote.pickup)}</p>
+        <p><strong>Delivery:</strong> ${escapeHtml(quote.delivery)}</p>
+        <p><strong>Pickup date:</strong> ${escapeHtml(quote.pickupDate)}</p>
+        <p><strong>Equipment:</strong> ${escapeHtml(quote.equipment)}</p>
+        <p><strong>Freight details:</strong><br>${escapeHtml(quote.details).replaceAll("\n", "<br>")}</p>
+      `,
+    });
+  } catch (error) {
+    notification = "failed";
+    notificationError = error instanceof Error ? error.message : "Unknown Zoho SMTP error";
+    console.error("Zoho quote notification failed:", error);
+  }
 
   try {
     const sql = getSql();
-
-    if (error) {
-      await sql`
-        UPDATE quote_requests
-        SET
-          email_notification_status = 'failed',
-          email_notification_error = ${String(error.message || "Unknown email error")},
-          updated_at = NOW()
-        WHERE id = ${quoteId}
-      `;
-    } else {
-      await sql`
-        UPDATE quote_requests
-        SET
-          email_notification_status = 'sent',
-          email_notification_error = NULL,
-          updated_at = NOW()
-        WHERE id = ${quoteId}
-      `;
-    }
+    await sql`
+      UPDATE quote_requests
+      SET
+        email_notification_status = ${notification},
+        email_notification_error = ${notificationError},
+        updated_at = NOW()
+      WHERE id = ${quoteId}
+    `;
   } catch (statusError) {
     console.error("Quote notification status update failed:", statusError);
   }
 
-  if (error) {
-    console.error("Quote notification failed:", error);
-    return NextResponse.json({ ok: true, id: quoteId, notification: "failed" });
-  }
-
-  return NextResponse.json({ ok: true, id: quoteId, notification: "sent" });
+  return NextResponse.json({ ok: true, id: quoteId, notification });
 }
