@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { getSql } from "@/lib/db";
+import { ensureQuoteSchema } from "@/lib/quote-schema";
 
 type QuotePayload = {
   company?: string;
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
   let quoteId: string;
 
   try {
+    await ensureQuoteSchema();
     const sql = getSql();
     const rows = await sql`
       INSERT INTO quote_requests (
