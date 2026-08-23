@@ -1,8 +1,8 @@
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
-let sqlClient: ReturnType<typeof neon> | null = null;
+let sqlClient: NeonQueryFunction<false, false> | null = null;
 
-export function getSql() {
+export function getSql(): NeonQueryFunction<false, false> {
   const databaseUrl = process.env.DATABASE_URL;
 
   if (!databaseUrl) {
