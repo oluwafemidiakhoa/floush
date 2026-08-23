@@ -1,33 +1,135 @@
-const loads = [
-  ["FL-1001", "Houston, TX", "Dallas, TX", "$1,425", "5.20", "In Transit"],
-  ["FL-1002", "San Antonio, TX", "Memphis, TN", "$2,980", "3.11", "Booked"],
-  ["FL-1003", "Dallas, TX", "Oklahoma City, OK", "$1,180", "4.03", "Delivered"],
-];
+import { getSql } from "@/lib/db";
+import { ensureOpsSchema } from "@/lib/ops-schema";
 
-export default function DashboardPage() {
+export const dynamic = "force-dynamic";
+
+type DashboardSummary = {
+  active_loads: number | string;
+  revenue_week_cents: number | string;
+  avg_effective_rpm: number | string | null;
+  delivered_loads: number | string;
+};
+
+type LoadRow = {
+  load_number: string;
+  pickup_location: string;
+  delivery_location: string;
+  revenue_cents: number | string;
+  loaded_miles: number | string | null;
+  status: string;
+};
+
+function money(cents: number | string) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(cents) / 100);
+}
+
+function statusLabel(status: string) {
+  return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export default async function DashboardPage() {
+  let summary: DashboardSummary = {
+    active_loads: 0,
+    revenue_week_cents: 0,
+    avg_effective_rpm: null,
+    delivered_loads: 0,
+  };
+  let loads: LoadRow[] = [];
+  let databaseReady = true;
+
+  try {
+    await ensureOpsSchema();
+    const sql = getSql();
+
+    const [summaryRows, loadRows] = await Promise.all([
+      sql`
+        SELECT
+          COUNT(*) FILTER (WHERE status IN ('booked','dispatched','in_transit')) AS active_loads,
+          COALESCE(SUM(revenue_cents) FILTER (WHERE created_at >= date_trunc('week', NOW())), 0) AS revenue_week_cents,
+          ROUND(
+            AVG(
+              CASE
+                WHEN loaded_miles IS NOT NULL AND loaded_miles > 0
+                THEN (revenue_cents::numeric / 100) / loaded_miles
+              END
+            ),
+            2
+          ) AS avg_effective_rpm,
+          COUNT(*) FILTER (WHERE status IN ('delivered','invoiced','paid')) AS delivered_loads
+        FROM loads
+      `,
+      sql`
+        SELECT load_number, pickup_location, delivery_location, revenue_cents, loaded_miles, status
+        FROM loads
+        ORDER BY created_at DESC
+        LIMIT 20
+      `,
+    ]);
+
+    if (summaryRows[0]) summary = summaryRows[0] as DashboardSummary;
+    loads = loadRows as LoadRow[];
+  } catch (error) {
+    databaseReady = false;
+    console.error("Operations dashboard database query failed:", error);
+  }
+
   return (
     <main className="dashboard">
       <header className="dashboard-header">
         <div className="shell nav-inner">
-          <a className="brand" href="/" style={{color:"white"}}><span className="brand-mark">F</span><span>FLOUSH OPS</span></a>
+          <a className="brand" href="/" style={{ color: "white" }}><span className="brand-mark">F</span><span>FLOUSH OPS</span></a>
           <a className="btn btn-secondary" href="/">Public Website</a>
         </div>
       </header>
+
       <div className="shell">
         <div className="dashboard-grid">
-          <div className="stat"><span>Active Loads</span><strong>2</strong></div>
-          <div className="stat"><span>Revenue This Week</span><strong>$5,585</strong></div>
-          <div className="stat"><span>Avg. Effective RPM</span><strong>$4.11</strong></div>
-          <div className="stat"><span>On-Time Delivery</span><strong>100%</strong></div>
+          <div className="stat"><span>Active Loads</span><strong>{Number(summary.active_loads)}</strong></div>
+          <div className="stat"><span>Revenue This Week</span><strong>{money(summary.revenue_week_cents)}</strong></div>
+          <div className="stat"><span>Avg. Effective RPM</span><strong>{summary.avg_effective_rpm == null ? "—" : `$${Number(summary.avg_effective_rpm).toFixed(2)}`}</strong></div>
+          <div className="stat"><span>Delivered Loads</span><strong>{Number(summary.delivered_loads)}</strong></div>
         </div>
-        <section className="table-wrap">
-          <table>
-            <thead><tr><th>Load</th><th>Pickup</th><th>Delivery</th><th>Rate</th><th>Eff. RPM</th><th>Status</th></tr></thead>
-            <tbody>{loads.map((load) => <tr key={load[0]}>{load.slice(0,5).map((cell,i) => <td key={i}>{cell}</td>)}<td><span className="status">{load[5]}</span></td></tr>)}</tbody>
-          </table>
-        </section>
+
+        {!databaseReady ? (
+          <section className="form-message error">
+            The operations database is unavailable. Check the Railway DATABASE_URL and visit /api/health/database for the exact status.
+          </section>
+        ) : (
+          <section className="table-wrap">
+            <table>
+              <thead><tr><th>Load</th><th>Pickup</th><th>Delivery</th><th>Rate</th><th>Eff. RPM</th><th>Status</th></tr></thead>
+              <tbody>
+                {loads.length ? loads.map((load) => {
+                  const miles = load.loaded_miles == null ? 0 : Number(load.loaded_miles);
+                  const effectiveRpm = miles > 0 ? Number(load.revenue_cents) / 100 / miles : null;
+                  return (
+                    <tr key={load.load_number}>
+                      <td>{load.load_number}</td>
+                      <td>{load.pickup_location}</td>
+                      <td>{load.delivery_location}</td>
+                      <td>{money(load.revenue_cents)}</td>
+                      <td>{effectiveRpm == null ? "—" : `$${effectiveRpm.toFixed(2)}`}</td>
+                      <td><span className="status">{statusLabel(load.status)}</span></td>
+                    </tr>
+                  );
+                }) : (
+                  <tr><td colSpan={6}>No loads yet. Real operational data will appear here after the first load is created.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        )}
+
         <section className="section">
-          <div className="section-head"><div className="eyebrow">Floush Intelligence</div><h2>Operating system foundation</h2><p>This dashboard currently uses demonstration data. The next release will connect persistent loads, drivers, trucks, customers, brokers, documents, expenses, and AI recommendations to a real database.</p></div>
+          <div className="section-head">
+            <div className="eyebrow">Floush Intelligence</div>
+            <h2>Live operating system foundation</h2>
+            <p>This dashboard now reads from Neon. It no longer displays demonstration revenue, load counts, or RPM. Customers, brokers, drivers, trucks, loads, expenses, and invoices are backed by persistent database tables and will populate as real operations begin.</p>
+          </div>
         </section>
       </div>
     </main>
