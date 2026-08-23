@@ -4,25 +4,27 @@ import { ensureQuoteSchema } from "@/lib/quote-schema";
 import { ensureOpsSchema } from "@/lib/ops-schema";
 
 export async function GET() {
+  const configured = Boolean(process.env.DATABASE_URL);
+
   try {
     await Promise.all([ensureQuoteSchema(), ensureOpsSchema()]);
     const sql = getSql();
-    const rows = await sql`SELECT NOW() AS database_time`;
+    await sql`SELECT 1 AS ok`;
 
     return NextResponse.json({
       ok: true,
+      configured,
       database: "connected",
       schema: "ready",
-      databaseTime: rows[0]?.database_time ?? null,
     });
   } catch (error) {
     console.error("Database health check failed:", error);
     return NextResponse.json(
       {
         ok: false,
+        configured,
         database: "unavailable",
         schema: "unknown",
-        error: error instanceof Error ? error.message : "Unknown database error",
       },
       { status: 503 },
     );
